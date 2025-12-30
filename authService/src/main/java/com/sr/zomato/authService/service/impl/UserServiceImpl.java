@@ -1,0 +1,118 @@
+package com.sr.zomato.authService.service.impl;
+
+import com.sr.zomato.authService.dto.UserDto;
+import com.sr.zomato.authService.dto.UserLoginDto;
+import com.sr.zomato.authService.dto.UserSignupDto;
+import com.sr.zomato.authService.entity.RoleType;
+import com.sr.zomato.authService.entity.Roles;
+import com.sr.zomato.authService.entity.User;
+import com.sr.zomato.authService.exception.InvalidCredentialsException;
+import com.sr.zomato.authService.exception.UserAlreadyExistsException;
+import com.sr.zomato.authService.exception.UserNotFoundException;
+import com.sr.zomato.authService.repository.UserRepository;
+import com.sr.zomato.authService.service.UserService;
+import jakarta.transaction.Transactional;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+
+import java.util.Set;
+import java.util.stream.Collectors;
+
+@Service
+@Transactional
+public class UserServiceImpl implements UserService {
+   private final PasswordEncoder passwordEncoder;
+   private final UserRepository userRepository;
+
+   public UserServiceImpl(PasswordEncoder passwordEncoder, UserRepository userRepository) {
+       this.passwordEncoder = passwordEncoder;
+       this.userRepository = userRepository;
+   }
+
+    private User findUserByIdentifier(String identifier) {
+
+        // Digits-only → reject
+        if (identifier.matches("^[0-9]{7,15}$")) {
+            throw new InvalidCredentialsException(
+                    "Mobile number must include country code (e.g. +919876543210)"
+            );
+        }
+
+        // Email
+        if (identifier.contains("@")) {
+            return userRepository.findByEmail(identifier.toLowerCase())
+                    .orElseThrow(() -> new UserNotFoundException("Invalid email, Please try Again"));
+        }
+
+        // Mobile number (digits only OR +digits)
+        if (identifier.matches("^\\+[1-9][0-9]{7,14}$")) {
+            return userRepository.findByMobileNumber(identifier)
+                    .orElseThrow(() -> new UserNotFoundException("Invalid mobile number"));
+        }
+
+        // Username
+        return userRepository.findByUserName(identifier.toLowerCase())
+                .orElseThrow(() -> new UserNotFoundException("Invalid username, Please try Again"));
+    }
+
+    private UserDto mapToUserDto(User user) {
+
+        UserDto userDto = new UserDto();
+        userDto.setFirstName(user.getFirstName());
+        userDto.setUserName(user.getUserName());
+        userDto.setMiddleName(user.getMiddleName());
+        userDto.setLastName(user.getLastName());
+        userDto.setEmail(user.getEmail());
+        userDto.setMobileNumber(user.getMobileNumber());
+        userDto.setCreatedAt(user.getCreatedAt());
+        userDto.setUpdatedAt(user.getUpdatedAt());
+        Set<RoleType> roles = user.getRoles()
+                .stream()
+                .map(Roles::getRole)
+                .collect(Collectors.toSet());
+
+        userDto.setRoles(roles);
+        return userDto;
+    }
+    @Override
+    public UserDto signup(UserSignupDto userSignupDto) throws UserAlreadyExistsException {
+
+       if(userRepository.findByUserName(userSignupDto.getUserName()).isPresent()){
+              throw new UserAlreadyExistsException("User with this username already exist! Try a different username");
+       }
+
+        if(userRepository.findByEmail(userSignupDto.getEmail()).isPresent()){
+            throw new UserAlreadyExistsException("User with this Email already exist! Try with other Email");
+        }
+        if(userRepository.findByMobileNumber(userSignupDto.getMobileNumber()).isPresent()){
+            throw new UserAlreadyExistsException("User with this mobile number already exist! Try another mobile number");
+        }
+
+        User user = new User();
+        user.setUserName(userSignupDto.getUserName().toLowerCase());
+        user.setEmail(userSignupDto.getEmail().toLowerCase());
+        user.setFirstName(userSignupDto.getFirstName());
+        user.setMiddleName(userSignupDto.getMiddleName());
+        user.setLastName(userSignupDto.getLastName());
+        user.setMobileNumber(userSignupDto.getMobileNumber());
+        user.setPassword(passwordEncoder.encode(userSignupDto.getPassword()));
+
+        Roles role = new Roles();
+        role.setRole(RoleType.USER);
+        role.setUser(user);
+
+        user.getRoles().add(role);
+
+        User savedUser = userRepository.save(user);
+        return mapToUserDto(savedUser);
+    }
+
+    @Override
+    public UserDto login(UserLoginDto userLoginDto) throws UserAlreadyExistsException{
+        User user = findUserByIdentifier(userLoginDto.getIdentifier());
+        if (!passwordEncoder.matches(userLoginDto.getPassword(), user.getPassword())) {
+            throw new InvalidCredentialsException("Invalid credential!, please try again.");
+        }
+        return mapToUserDto(user);
+    }
+}

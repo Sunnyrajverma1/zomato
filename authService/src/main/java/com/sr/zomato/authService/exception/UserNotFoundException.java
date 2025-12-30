@@ -1,0 +1,7 @@
+package com.sr.zomato.authService.exception;
+
+public class UserNotFoundException extends RuntimeException {
+    public UserNotFoundException(String message) {
+        super(message);
+    }
+}
